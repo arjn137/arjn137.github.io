@@ -1,0 +1,350 @@
+# The Impact of Referees on English Premier League Matches
+
+## Introduction
+
+After a loss in professional sports the first thing you always hear from the losing team's supporters is that the refs rigged the game. While refs have a very difficult job discerning the game and making calls, in some instances match fixing or bias can lead to an unfavorable outcome for the opposing team. In this project we can analyze English Premier League football matches from 2009 to 2019 to understand if there is evident bias from certain refs towards particular top teams. I will walk you through the data science pipeline to get this done, starting with collecting and formatting data, then processing the data with some exploratory analysis, and finally test this hypothesis with machine learning techniques.
+
+## Required Tools
+
+This tutorial will be done in R and requires the tidyverse and reshape2 libraries.
+
+## 1) Getting Started
+
+The first step is to acquire our data. This requires downloading every season's data from https://datahub.io/sports-data/english-premier-league. We will be dealing with the csv versions so opt to download that version instead of the json. Once the data is downloaded we can import them into data frames using the read.csv() command. After creating data frames for all 10 seasons we can use the rbind() command to append each season's data frame to one another creating a "total" data frame that houses all 10 season's worth of information.
+
+```{r setup}
+library(tidyverse)
+library(reshape2)
+`1819` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-1819_csv.csv", header=TRUE, sep=",")
+`1718` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-1718_csv.csv", header=TRUE, sep=",")
+`1617` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-1617_csv.csv", header=TRUE, sep=",")
+`1516` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-1516_csv.csv", header=TRUE, sep=",")
+`1415` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-1415_csv.csv", header=TRUE, sep=",")
+`1314` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-1314_csv.csv", header=TRUE, sep=",")
+`1213` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-1213_csv.csv", header=TRUE, sep=",")
+`1112` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-1112_csv.csv", header=TRUE, sep=",")
+`1011` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-1011_csv.csv", header=TRUE, sep=",")
+`0910` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-0910_csv.csv", header=TRUE, sep=",")
+total <- rbind(`1819`, `1718`, `1617`, `1516`, `1415`, `1314`, `1213`, `1112`, `1011`, `0910`)
+```
+
+```{r 1}
+head(total)
+```
+
+Notice how the data has quite a few fields from Date, HomeTeam, AwayTeam, FTHG (Full Time Home Goals), FTAG (Full Time Home Goals), FTR (Full Time Result), HTHG (Half Time Home Goals), HTAG (Half Time Away Goals), HTR (Half Time Result), Referee, and plenty of other in game stats. As you will see in the following step, many of these fields aren't going to be used moving forward. 
+
+### 1.1 Tidying Data and Selecting Attributes
+
+The first step to tidying this dataset is selecting the attributes we want to look at. We use the select() command to choose Date, HomeTeam, AwayTeam, FTR (Full Time Result), and Referee. Afterwards, we tidy the data by changing each attribute from a factor to a character type. 
+
+```{r 1.1}
+condensed <- total %>%
+  select(Date, HomeTeam, AwayTeam, FTR, Referee) %>%
+  transform(Date = as.Date(Date)) %>%
+  transform(HomeTeam = as.character(HomeTeam)) %>%
+  transform(AwayTeam = as.character(AwayTeam)) %>%
+  transform(FTR = as.character(FTR)) %>%
+  transform(Referee = as.character(Referee))
+head(condensed)
+```
+
+### 1.2 Finding Most Common Referees
+
+Since dealing with every referee that has ever officiated a Premier League game would be extremely tedious and overwhelming, we'll be using a subset of the top 6 referees based on the number of games they have officiated. We can do this by selecting the Referee attribute and using the table() function. The table() function automatically provides you with the number of times an entity appears in a dataset. By arranging the data frame in reverse order and using slice(1:6) to get only the top 6 results, we can see that the 6 that appear are the most experienced refs.
+
+```{r 1.2}
+refereeCount <- condensed %>%
+  select(Referee) %>%
+  table() %>%
+  as.data.frame() %>%
+  arrange(desc(Freq)) %>%
+  slice(1:6)
+colnames(refereeCount)[1] <- "Referee"
+head(refereeCount)
+```
+
+### 1.3 Limiting to Top 6
+
+Because we want to see the influence of the top 6 referees on the top 6 teams in the Premier League, we should limit our data to only include matches that feature the top 6 in both categories. In the following code you will see a vector called "topTeams" that includes the top 6 teams as strings. We then condense the original data frame once again, first filtering by the referees found in the previous step and then filtering to see whether the HomeTeam or AwayTeam includes one of the top 6 teams.
+
+```{r 1.3}
+topTeams <- c("Man United", "Chelsea", "Tottenham", "Man City", "Liverpool", "Arsenal")
+condensed <- condensed %>%
+  filter(condensed$Referee %in% refereeCount$Ref) %>%
+  filter(HomeTeam %in% topTeams | AwayTeam %in% topTeams)
+head(condensed)
+```
+
+## 2) Exploratory Data Analysis
+
+The data is now how we would like it to be: including the top 6 referees based on the number of matches they've officiated and the top 6 Premier League teams based on recent performance. We can now begin preliminary analysis that will lead us to develop testable hypotheses.
+
+### 2.1 Initial Referee Analysis
+
+Although the following piece of analysis doesn't immediately help our conclusion, it can be good to see that there is variance that exists between referees in terms of win percentage of home teams versus away teams. The first step to creating this table is using the summarize() function to create 3 new columns: HomeWins, AwayWins, and Draws. These columns represent the distribution of Home and Away results for every referee but don't really provide much context about a referee since they have officiated a different number of games. Using the mutate() function we can create an attribute for Total games along with the Home Win Rate (HWR), Away Win Rate (AWR), and Draw Rate (DR). These rate are derived from dividing the HomeWins by the Total number of games and provide a better idea of the variance between referees. The graph below uses the melt function from the reshape2 library and creates a new data frame that moves the HWR, AWR, and DR attributes into their own respective entities. This makes plotting using ggplot much easier and allows the creation of the grouped bar graph seen below. This shows us some general variability in the Win Rates of referees at home and away.
+
+```{r 2.1}
+refGameStats <- condensed %>%
+  group_by(Referee) %>%
+  summarize(HomeWins = sum(FTR == 'H'), AwayWins = sum(FTR == 'A'), Draws = sum(FTR == 'D'))  %>%
+  mutate(Total = HomeWins + AwayWins + Draws, HWR = HomeWins/(HomeWins+AwayWins+Draws), AWR = AwayWins/(HomeWins+AwayWins+Draws), DR = Draws/(HomeWins+AwayWins+Draws))
+head(refGameStats)
+
+graphGameStats <- melt(refGameStats[,c('Referee','HWR','AWR','DR')], id.vars = 1)
+ggplot(graphGameStats, aes(x=Referee, y=value)) + 
+    geom_bar(aes(fill = variable), stat = "identity", position = "dodge")
+```
+
+### 2.2 Adding Additional Attributes For Top 6
+
+In this and the following steps we will be developing a metric to determining how a referee is judged based on a top 6 team's performance. In this step we will go back to the original condensed data frame and add 6 columns for each team. Each of these new columns contain a value based on whether they won, drew, or lost. If the team won they receive 3 points, a draw counts as 1, and a loss is 0. NA he default value if a team isn't participating in that particular game because we don't want to interfere with the modeling in part 3. Due to the NAs, we use melt from the reshape2 library again to reformat the data and eliminate any unknown quantities.
+
+```{r 2.2}
+condensed$ManU <- ifelse(condensed$HomeTeam == "Man United" & condensed$FTR == "H" |
+                           condensed$AwayTeam == "Man United" & condensed$FTR == "A", 3, 
+                         ifelse(condensed$HomeTeam == "Man United" & condensed$FTR == "D" |
+                           condensed$AwayTeam == "Man United" & condensed$FTR == "D", 1, 
+                           ifelse(condensed$HomeTeam == "Man United" & condensed$FTR == "A" |
+                           condensed$AwayTeam == "Man United" & condensed$FTR == "H", 0, NA)))
+condensed$ManC <- ifelse(condensed$HomeTeam == "Man City" & condensed$FTR == "H" |
+                           condensed$AwayTeam == "Man City" & condensed$FTR == "A", 3, 
+                         ifelse(condensed$HomeTeam == "Man City" & condensed$FTR == "D" |
+                           condensed$AwayTeam == "Man City" & condensed$FTR == "D", 1, 
+                           ifelse(condensed$HomeTeam == "Man City" & condensed$FTR == "A" |
+                           condensed$AwayTeam == "Man City" & condensed$FTR == "H", 0, NA)))
+condensed$Che <- ifelse(condensed$HomeTeam == "Chelsea" & condensed$FTR == "H" |
+                           condensed$AwayTeam == "Chelsea" & condensed$FTR == "A", 3, 
+                         ifelse(condensed$HomeTeam == "Chelsea" & condensed$FTR == "D" |
+                           condensed$AwayTeam == "Chelsea" & condensed$FTR == "D", 1, 
+                           ifelse(condensed$HomeTeam == "Chelsea" & condensed$FTR == "A" |
+                           condensed$AwayTeam == "Chelsea" & condensed$FTR == "H", 0, NA)))
+condensed$Liv <- ifelse(condensed$HomeTeam == "Liverpool" & condensed$FTR == "H" |
+                           condensed$AwayTeam == "Liverpool" & condensed$FTR == "A", 3, 
+                         ifelse(condensed$HomeTeam == "Liverpool" & condensed$FTR == "D" |
+                           condensed$AwayTeam == "Liverpool" & condensed$FTR == "D", 1, 
+                           ifelse(condensed$HomeTeam == "Liverpool" & condensed$FTR == "A" |
+                           condensed$AwayTeam == "Liverpool" & condensed$FTR == "H", 0, NA)))
+condensed$Tot <- ifelse(condensed$HomeTeam == "Tottenham" & condensed$FTR == "H" |
+                           condensed$AwayTeam == "Tottenham" & condensed$FTR == "A", 3, 
+                         ifelse(condensed$HomeTeam == "Tottenham" & condensed$FTR == "D" |
+                           condensed$AwayTeam == "Tottenham" & condensed$FTR == "D", 1, 
+                           ifelse(condensed$HomeTeam == "Tottenham" & condensed$FTR == "A" |
+                           condensed$AwayTeam == "Tottenham" & condensed$FTR == "H", 0, NA)))
+condensed$Ars <- ifelse(condensed$HomeTeam == "Arsenal" & condensed$FTR == "H" |
+                           condensed$AwayTeam == "Arsenal" & condensed$FTR == "A", 3, 
+                         ifelse(condensed$HomeTeam == "Arsenal" & condensed$FTR == "D" |
+                           condensed$AwayTeam == "Arsenal" & condensed$FTR == "D", 1, 
+                           ifelse(condensed$HomeTeam == "Arsenal" & condensed$FTR == "A" |
+                           condensed$AwayTeam == "Arsenal" & condensed$FTR == "H", 0, NA)))
+
+head(condensed)
+tidyCondensed <- melt(data=condensed, id=c('Date','HomeTeam', 'AwayTeam', 'FTR', 'Referee'), na.rm = TRUE)
+names(tidyCondensed)[6]<-"CurrentTeam"
+names(tidyCondensed)[7]<-"PointValue"
+head(tidyCondensed)
+```
+
+### 2.3 Examining Team Points Per Referee 
+
+Now we are going to aggregate the points that we dealt to each team in the last step. After grouping by Referee we can use summarize again and add up all the values for each team. These point values are stored in each team's respective column for each referee. We needed to make a quick fix in the beginning to deal with the NAs we inputted in the last step so we can aggregate these sums. 
+
+```{r 2.3}
+tempCondensed <- condensed
+tempCondensed[is.na(tempCondensed)] <- 0
+refPointsRaw <- tempCondensed %>%
+  group_by(Referee) %>%
+  summarize(ManUPts = sum(ManU), ManCPts = sum(ManC), ChePts = sum(Che), LivPts = sum(Liv), TotPts = sum(Tot), ArsPts = sum(Ars))
+head(refPointsRaw)
+```
+
+### 2.4 Calculating Number of Matches For Each Referee
+
+Just like in section 2.1, if we want to develop a consistent metric across referees, we need to find the number of matches each ref officiated for each team. Raw point values aren't useful since some referees have called more matches for certain teams over others. In this step we take the refGameStats data frame and mutate new columns to see how many times a team appeared in a game for each referee. We then use the unique() command because there were many duplicate rows and the resultant data frame has the total games by team for each ref.
+
+```{r 2.4}
+refTeams <- refGameStats %>%
+  merge(condensed) %>%
+  group_by(Referee) %>%
+  mutate(ManUGames = sum("Man United" == HomeTeam | "Man United" == AwayTeam),
+         ManCGames = sum("Man City" == HomeTeam | "Man City" == AwayTeam),
+         CheGames = sum("Chelsea" == HomeTeam | "Chelsea" == AwayTeam),
+         LivGames = sum("Liverpool" == HomeTeam | "Liverpool" == AwayTeam),
+         TotGames = sum("Tottenham" == HomeTeam | "Tottenham" == AwayTeam),
+         ArsGames = sum("Arsenal" == HomeTeam | "Arsenal" == AwayTeam)) %>%
+  select(Referee, ManUGames, ManCGames, CheGames, LivGames, TotGames, ArsGames) %>%
+  unique()
+head(refTeams)
+```
+
+### 2.5 Finding Average Point Value By Ref 
+
+Finally after curating all the necessary data, we can develop a metric that shows us how each referee officiates each team. A lower number means that the referee tends to not favor the team and a higher number indicates otherwise. The graph below indicates the point values for each team for each Referee. Like before the melt function from reshape2 was used to readjust the attributes and place them into entities. Afterwards, we use ggplot to graph the values for each team. The facet_grid() function allows us to separate each line graph for each ref and using the color aesthetic on the points makes it easy to distinguish between teams. This can give us an idea as to whether a referee favors one team over the others and in the upcoming section we will using machine learning techniques to test these hyptheses. It is important to mention however, that sample size matters for each of these points. For example, in the case of Referee M Dean, his average point value score for Liverpool is a 3.0. With no context you can get the impression that Liverpool wins everytime M Dean officiates. While this is true, it is important to note that M Dean has only officiated 2 Liverpool games, both of which they won. 2 games is misleading considering every other point has over 12 samples. 
+
+```{r 2.5}
+refAvgPoints <- refPointsRaw %>%
+  merge(refTeams) %>%
+  mutate(AdjManU = ManUPts/ManUGames, AdjManC = ManCPts/ManCGames,
+         AdjChe = ChePts/CheGames, AdjLiv = LivPts/LivGames,
+         AdjTot = TotPts/TotGames, AdjArs = ArsPts/ArsGames) %>%
+  select(Referee, AdjManU, AdjManC, AdjChe, AdjLiv, AdjTot, AdjArs)
+head(refAvgPoints)
+
+graphAvgPts <- melt(refAvgPoints[,c('Referee','AdjManU', 'AdjManC', 'AdjChe', 'AdjLiv', 'AdjTot', 'AdjArs')], id.vars = 1)
+ggplot(graphAvgPts, aes(x=variable, y=value, group=Referee)) + 
+  facet_grid(~Referee) +
+  geom_point(aes(color=variable, size=2)) +
+  geom_line() +
+  geom_text(label='') +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+## 3) Machine Learning + Hypothesis Testing
+
+By using Machine Learning we can develop predictions about our data and ultimately test our hypotheses to see whether there is a significant relation between variables. In the following sections we will use some of these strategies to see whether referees have bias toward certain teams. 
+
+### 3.1 Creating a Hypothesis
+
+Like what was mentioned in the introduction, our goal for this project is to investigate whether there is a significant bias from certain refs towards top Premier League teams. Our dataset is a little funky so we need to break up our analysis into 6 parts, corresponding to each of the top teams we determined earlier. In each of these 6 sections there are 2 steps that take place. The first is altering our tidyCondensed data frame for each team. We do this by filtering based on the CurrentTeam parameter and whether the team they are playing is in our topTeams vector. The reason why we want to limit matchups to only between topteams is because there may be bias since some opponents are better than others and Referees are assigned at random. We then use mutate to add a new Opponent column so we can easily know the team that we are regressing for and the team they are playing against. Afterwards we use the lm command to run a linear regression for each of the top teams to estimate the effects of certain variables on that team's success. We use the following model: PointValue = B0 + B1*Opponent + B2*Referee + u. We use Opponent and Referee as independent variables because both have an effect as to whether the team wins, draws, or loses. 
+
+### 3.2 Manchester United
+
+```{r 3.2, warning=FALSE}
+ManUReg <- tidyCondensed %>%
+  filter((CurrentTeam == 'ManU' & (AwayTeam %in% topTeams & HomeTeam %in% topTeams))) %>%
+  mutate(Opponent = ifelse(HomeTeam == 'Man United', AwayTeam, HomeTeam))
+head(ManUReg)
+MUR <- lm(PointValue~Opponent+Referee, ManUReg, family='binomial') %>%
+  broom::tidy()
+MUR
+
+```
+
+### 3.3 Manchester City
+
+```{r 3.3, warning=FALSE}
+ManCReg <- tidyCondensed %>%
+  filter((CurrentTeam == 'ManC' & (AwayTeam %in% topTeams & HomeTeam %in% topTeams))) %>%
+  mutate(Opponent = ifelse(HomeTeam == 'Man City', AwayTeam, HomeTeam))
+head(ManCReg)
+MCR <- lm(PointValue~Opponent+Referee, ManCReg, family='binomial') %>%
+  broom::tidy()
+MCR
+```
+
+### 3.4 Chelsea
+
+```{r 3.4, warning=FALSE}
+CheReg <- tidyCondensed %>%
+  filter((CurrentTeam == 'Che' & (AwayTeam %in% topTeams & HomeTeam %in% topTeams))) %>%
+  mutate(Opponent = ifelse(HomeTeam == 'Chelsea', AwayTeam, HomeTeam))
+head(CheReg)
+CR <- lm(PointValue~Opponent+Referee, CheReg, family='binomial') %>%
+  broom::tidy()
+CR
+```
+
+### 3.5 Liverpool
+
+```{r 3.5, warning=FALSE}
+LivReg <- tidyCondensed %>%
+  filter((CurrentTeam == 'Liv' & (AwayTeam %in% topTeams & HomeTeam %in% topTeams))) %>%
+  mutate(Opponent = ifelse(HomeTeam == 'Liverpool', AwayTeam, HomeTeam))
+head(LivReg)
+LR <- lm(PointValue~Opponent+Referee, LivReg, family='binomial') %>%
+  broom::tidy()
+LR
+```
+
+### 3.6 Tottenham
+
+```{r 3.6, warning=FALSE}
+TotReg <- tidyCondensed %>%
+  filter((CurrentTeam == 'Tot' & (AwayTeam %in% topTeams & HomeTeam %in% topTeams))) %>%
+  mutate(Opponent = ifelse(HomeTeam == 'Tottenham', AwayTeam, HomeTeam))
+head(TotReg)
+TR <- lm(PointValue~Opponent+Referee, TotReg, family='binomial') %>%
+  broom::tidy()
+TR
+```
+
+### 3.7 Arsenal
+
+```{r 3.7, warning=FALSE}
+ArsReg <- tidyCondensed %>%
+  filter((CurrentTeam == 'Ars' & (AwayTeam %in% topTeams & HomeTeam %in% topTeams))) %>%
+  mutate(Opponent = ifelse(HomeTeam == 'Arsenal', AwayTeam, HomeTeam))
+head(ArsReg)
+AR <- lm(PointValue~Opponent+Referee, ArsReg, family='binomial') %>%
+  broom::tidy()
+AR
+```
+
+## 4 Analyzing our results
+
+After running 6 regression for each of the 6 teams we can analyze p-values to see whether a ref plays a significant role in a team's success or lack of success. The following piece of code makes it a little easier to see which referees play significant roles in the performance of various teams. First we want to add a column to each linear regression table we made before to represent the team the regression was done on. Then, we use rbind to append the data frames onto one another and use 2 filters. The first is to find relevant rows with a significance level up to 15% and the second is to filter out Intercepts and Opponents because the significance of those is irrelevant to our hypothesis.
+
+```{r 4}
+MUR <- MUR %>%
+  mutate(team = "MU")
+MCR <- MCR %>%
+  mutate(team = "MC")
+CR <- CR %>%
+  mutate(team = "C")
+LR <- LR %>%
+  mutate(team = "L")
+TR <- TR %>%
+  mutate(team = "T")
+AR <- AR %>%
+  mutate(team = "A")
+totSig <- rbind(MUR, MCR, CR, LR, TR, AR) %>%
+  filter(p.value < 0.15) %>%
+  filter(grepl("Referee", term))
+
+totSig
+```
+
+### 4.1 Manchester United and Arsenal
+
+For Manchester United, Referee M Atkinson has a p-value of 0.006 which is significant up to the 1% level. His positive effect on Manchester United is extremely significant and if we take the estimated intercept (1.7328564) and add it to the estimated coefficient for M Atkinson (1.4200861), we get an estimated 3.15 points, ceteris paribus, which is equivalent to a win. So we can imply from these results that when M Atkinson officiates a game for Manchester United, they are more likely to win against a top team.
+
+Referee M Atkinson was also significant for Arsenal, with a p-value of 0.102 (significant at the 15% level). In this case M Atkinson actually has a negative effect on Arsenal's performance with an estimated coefficient of -0.7571792. With an intercept of 1.12317, we get an estimated point value of 0.366, ceteris paribus, which is very close to 0 and can indicate a loss. Since a draw is 1 point, the estimation is in between but is still closer to 0. Through this we can imply that when M Atkinson officiates a game for Arsenal, they are more likely to lose against a top team. 
+
+### 4.2 Chelsea and Liverpool
+
+As with Manchester United and Arsenal, Chelsea and Liverpool share a referee that plays a significant role in their success versus top teams, Referee A Taylor. For Chelsea, A Taylor has a positive effect with an estimated increase of 0.97999 points, ceteris paribus, with a p-value of 0.122 which is significant at the 15% level. When coupled with the intercept 1.6243, we get an estimated point value of 2.604 ceteris paribus. This value is very close to 3 and when holding other variables constant, Chelsea is more likely to win when A Taylor is officiating their match against another top team.
+
+For Liverpool, once again there is an opposite effect. With a p-value of 0.116 the estimated coefficient of -0.9507 is significant at the 15% level. When added to the intercept 1.76319, Liverpool is expected to see 0.8125 points when A Taylor officiates them against another top team, ceteris paribus. This is very close to 1 point so we can imply that when A Taylor is officiating a Liverpool game versus another top team, the result will most likely be a draw. 
+
+### 4.3 Tottenham
+
+Unlike the previous 4 teams that had 1 Referee that was statistically significant for their matches, of the top 6 most experienced Referees in the Premier League from 2009-2019, 3 have a significant impact on Tottenham's performance. 
+
+L Mason - With a p-value of 0.0989, L Mason is significant even to the 10% level. With an estimated positive effect of 2.165 points, ceteris paribus, and an estimated intercept of 1.8274, Tottenham's estimated point output versus top teams with L Mason as the ref is 3.99 points, ceteris paribus. This is well over 3 points so we can safely imply that when L Mason is officiating Tottenham against another top team they are more likely to win.
+
+M Dean - With a p-value of 0.1376, M Dean is significant to the 15% level. With an estimated effect of -0.768 points, ceteris paribus, and an estimated intercept of 1.8274, Tottenham's estimated point output versus top teams with M Dean as the ref is 1.05 points, ceteris paribus. This is right around 1 point so we can imply that when M Dean is officiating Tottenham against another top team they are very likely to draw the match.
+
+M Oliver - With a p-value of 0.1098, M Oliver is significant to the 15% level. With an estimated effect of -0.882 points, ceteris paribus, and an estimated intercept of 1.8274, Tottenham's estimated point output versus top teams with M Oliver as the ref is .945 points, ceteris paribus. This is right around 1 point so we can imply that when M Oliver is officiating Tottenham against another top team they are very likely to draw the match.
+
+### 4.4 Manchester City
+
+There was no official for Manchester City that was statistically significant enough at the 15% level to impact the performance of the team.
+
+## 5 Summary and Final Thoughts
+
+After conducting this analysis we have an idea of which popular referees are most likely to have biases for and against the top Premier League teams. M Atkinson tends to favor Manchester United but not Arsenal, A Taylor likes Chelsea but not necessarily Liverpool, L Mason loves Tottenham while M Dean and M Oliver have negative impacts. Now if you watch your favorite Premier League team play and one of these referees are officiating, you can keep an eye out to see if there's anything suspicious going on! 
+
+Moving forward we can investigate these same ideas for the rest of the Premier League and many other referees as well and maybe even expand to other football leagues and potentially other sports given the data. 
+
+## References
+
+Datasets from https://datahub.io/sports-data/english-premier-league
+
+Tidyverse - https://cran.r-project.org/web/packages/tidyverse/index.html
+
+Reshape2 - https://cran.r-project.org/web/packages/reshape2/index.html
+
+Melt - https://www.rdocumentation.org/packages/reshape2/versions/1.4.3/topics/melt
+
+Broom - https://cran.r-project.org/web/packages/broom/vignettes/broom.html
+
