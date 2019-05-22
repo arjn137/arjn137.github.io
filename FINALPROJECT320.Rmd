@@ -12,7 +12,7 @@ This tutorial will be done in R and requires the tidyverse and reshape2 librarie
 
 The first step is to acquire our data. This requires downloading every season's data from https://datahub.io/sports-data/english-premier-league. We will be dealing with the csv versions so opt to download that version instead of the json. Once the data is downloaded we can import them into data frames using the read.csv() command. After creating data frames for all 10 seasons we can use the rbind() command to append each season's data frame to one another creating a "total" data frame that houses all 10 season's worth of information.
 
-```{r setup}
+```{r setup, message=FALSE}
 library(tidyverse)
 library(reshape2)
 `1819` <- read.csv(file="C:/Users/socce/Downloads/english-premier-league_zip/data/season-1819_csv.csv", header=TRUE, sep=",")
